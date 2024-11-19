@@ -18,3 +18,5 @@ class StorageUnit:
 		
 class PrimeRings:
 	Ring_root root 
+
+class oi:
