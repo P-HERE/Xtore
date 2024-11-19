@@ -1,0 +1,64 @@
+#!/usr/bin/env python
+
+from xtore.cli.StorageTestCLI import run
+if __name__ == '__main__': run()
+
+#temp
+
+from libc.math cimport ceil
+
+cdef class ConsistentHashing:
+    cdef:
+        dict ring              # A dictionary to map hash values to nodes
+        list sorted_hashes     # A sorted list of hash values on the ring
+        int virtual_node_count # Number of virtual nodes per physical node
+    
+    def __init__(self, virtual_node_count=100):
+        """
+        Initialize the consistent hashing structure.
+        """
+        self.ring = {}
+        self.sorted_hashes = []
+        self.virtual_node_count = virtual_node_count
+
+    def _hash(self, key: str) -> int:
+        """
+        Compute a hash value for a given key.
+        """
+        return abs(hash(key)) % (2**32)
+
+    def add_node(self, node_id: str):
+        """
+        Add a physical node to the hash ring with virtual nodes.
+        """
+        for i in range(self.virtual_node_count):
+            virtual_key = f"{node_id}#{i}"
+            hash_value = self._hash(virtual_key)
+            self.ring[hash_value] = node_id
+            self.sorted_hashes.append(hash_value)
+        
+        self.sorted_hashes.sort()
+
+    def remove_node(self, node_id: str):
+        """
+        Remove a physical node from the hash ring along with its virtual nodes.
+        """
+        for i in range(self.virtual_node_count):
+            virtual_key = f"{node_id}#{i}"
+            hash_value = self._hash(virtual_key)
+            if hash_value in self.ring:
+                del self.ring[hash_value]
+                self.sorted_hashes.remove(hash_value)
+
+    def get_node(self, key: str) -> str:
+        """
+        Get the node responsible for a given key.
+        """
+        hash_value = self._hash(key)
+        # Find the first node in the sorted list greater than or equal to hash_value
+        for h in self.sorted_hashes:
+            if h >= hash_value:
+                return self.ring[h]
+        # Wrap around to the first node if no greater value is found
+        return self.ring[self.sorted_hashes[0]]
+
