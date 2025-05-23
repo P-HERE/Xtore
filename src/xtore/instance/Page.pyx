@@ -31,10 +31,12 @@ cdef class Page:
 	
 	cdef i64 create(self):
 		self.position = self.io.getTail()
+		# print(800, f"Page.create io@{id(self.io)} position={self.position}")
 		self.reset()
 		self.writeHeader()
 		self.stream.position = self.pageSize
 		self.io.fill(&self.stream)
+		# print(801, f"Page.create after create tail={self.io.getTail()}")
 		self.stream.position = self.headerSize
 		return self.position
 	
@@ -51,15 +53,11 @@ cdef class Page:
 		cdef i32 capacity = self.pageSize-self.tail
 		cdef i32 size
 		if capacity >= stream.position:
-			if self.hasBody:
-				size = stream.position + 4
-				setBuffer(&self.stream, <char *> &stream.position, 4)
-				setBuffer(&self.stream, stream.buffer, stream.position)
-				self.io.seek(self.position+self.tail)
-				self.io.writeOffset(&self.stream, self.tail, size)
-			else:
-				self.io.seek(self.position+self.tail)
-				self.io.write(stream)
+			size = stream.position + 4
+			setBuffer(&self.stream, <char *> &stream.position, 4)
+			setBuffer(&self.stream, stream.buffer, stream.position)
+			self.io.seek(self.position+self.tail)
+			self.io.writeOffset(&self.stream, self.tail, size)
 			self.tail += size
 			self.n += 1
 			self.writeHeader()
@@ -70,18 +68,10 @@ cdef class Page:
 	cdef bint appendValue(self, char *value):
 		if self.itemSize <= 0: return False
 		cdef i32 capacity = self.pageSize-self.tail
-		cdef Buffer stream
 		if capacity >= self.itemSize:
-			if self.hasBody:
-				memcpy(self.stream.buffer+self.tail, value, self.itemSize)
-				self.io.seek(self.position+self.tail)
-				self.io.writeOffset(&self.stream, self.tail, self.itemSize)
-			else:
-				stream.buffer = value
-				stream.position = self.itemSize
-				stream.capacity = self.itemSize
-				self.io.seek(self.position+self.tail)
-				self.io.write(&stream)
+			memcpy(self.stream.buffer+self.tail, value, self.itemSize)
+			self.io.seek(self.position+self.tail)
+			self.io.writeOffset(&self.stream, self.tail, self.itemSize)
 			self.tail += self.itemSize
 			self.n += 1
 			self.writeHeader()
@@ -131,6 +121,10 @@ cdef class Page:
 		self.io.seek(self.position)
 		self.io.write(&self.stream)
 		self.stream.position = self.tail
+		# if self.position == 7827669:
+		# 	print(803, self)
+		# 	self.readHeader(self.position)
+		# 	print(804, self)
 	
 	cdef writeHeaderBuffer(self):
 		self.stream.position = 0

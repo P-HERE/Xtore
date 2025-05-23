@@ -1,6 +1,6 @@
 from xtore.BaseType cimport i32, i64
 from xtore.instance.LinkedPageStorage cimport LinkedPageStorage
-from xtore.instance.HashPageNode cimport HashPageNode
+from xtore.instance.RecordPageNode cimport RecordPageNode
 from xtore.instance.Page cimport Page
 from xtore.instance.LinkedPage cimport LinkedPage
 
@@ -43,7 +43,7 @@ cdef class DoubleLayerIterator:
 		cdef i64 lowerPosition = self.getLowerPosition(0)
 		self.lower.read(lowerPosition)
 
-	cdef bint getNext(self, HashPageNode entry):
+	cdef bint getNext(self, RecordPageNode entry):
 		cdef DoubleLayerIndex index
 		cdef bint result = self.move(&index)
 		# print(400, result, getIndexString(index), self.upper.next, self.currentIndex, self.currentSubIndex, self.upper.n, self.lower.n)
@@ -67,7 +67,7 @@ cdef class DoubleLayerIterator:
 			# print(401, '-'*50, self.upper.next < 0, self.currentIndex+1 >= self.upper.n)
 			if self.upper.next < 0 and self.currentIndex+1 >= self.upper.n:
 				return False
-			elif self.currentIndex+1 < self.upper.n:
+			elif self.currentIndex <= self.upper.n:
 				self.currentIndex += 1
 				index.lowerPosition = self.getLowerPosition(self.currentIndex)
 				self.lower.read(index.lowerPosition)

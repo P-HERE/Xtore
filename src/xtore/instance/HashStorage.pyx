@@ -1,6 +1,10 @@
 from xtore.common.Buffer cimport Buffer, setBuffer, setBoolean, getBuffer, getBoolean, initBuffer, releaseBuffer
-from xtore.instance.HashNode cimport HashNode
+from xtore.instance.RecordNode cimport RecordNode
 from xtore.instance.LinkedPageStorage cimport LinkedPageStorage
+from xtore.instance.BasicStorage cimport BasicStorage
+from xtore.instance.CollisionMode cimport CollisionMode
+from xtore.instance.BasicIterator cimport BasicIterator
+from xtore.instance.HashIterator cimport HashIterator
 from xtore.common.StreamIOHandler cimport StreamIOHandler
 from xtore.common.TimeUtil cimport getMicroTime
 from xtore.BaseType cimport u32, i32, i64, f64
@@ -24,10 +28,11 @@ cdef i32 NOT_FOUND_AND_SET = 0
 cdef i32 FOUND_AND_SET = 1
 cdef i32 NOT_SET = 2
 
-cdef class HashStorage:
+cdef class HashStorage (BasicStorage):
 	def __init__(self, StreamIOHandler io, CollisionMode mode):
 		self.mode = mode
 		self.headerSize = HASH_STORAGE_HEADER_SIZE
+		self.name = None
 		self.io = io
 		self.layer = -1
 		self.position = -1
@@ -89,9 +94,6 @@ cdef class HashStorage:
 		self.isCreated = True
 		return self.rootPosition
 
-	cdef HashNode createNode(self):
-		raise NotImplementedError
-
 	cdef writeHeader(self):
 		self.headerStream.position = 0
 		self.writeHeaderBuffer(&self.headerStream)
@@ -126,17 +128,17 @@ cdef class HashStorage:
 		self.lastUpdate = (<f64 *> getBuffer(&self.headerStream, 8))[0]
 		self.isIterable = getBoolean(&self.headerStream)
 		memcpy(self.layerPosition, getBuffer(&self.headerStream, 8*HASH_LAYER), 8*HASH_LAYER)
-		
-	cdef HashNode get(self, HashNode reference, HashNode result):
+
+	cdef RecordNode get(self, RecordNode reference, RecordNode result):
 		if self.layer < 0: return None
 		cdef i64 hashed = reference.hash()
-		cdef HashNode found = self.getBucket(hashed, reference, result)
+		cdef RecordNode found = self.getBucket(hashed, reference, result)
 		if found is not None: return found
 		if self.layer < HASH_LAYER: return None
 		found = self.getTreePage(hashed, reference, result)
 		return found
 
-	cdef set(self, HashNode reference):
+	cdef set(self, RecordNode reference):
 		cdef i64 hashed = reference.hash()
 		cdef i32 setResult = self.setBucket(hashed, reference)
 		if setResult == NOT_SET:
@@ -146,16 +148,19 @@ cdef class HashStorage:
 			self.pageStorage.appendValue(<char *> &reference.position)
 		self.lastUpdate = getMicroTime()
 	
-	cdef setComparingNode(self, HashNode comparingNode):
+	cdef BasicIterator createIterator(self):
+		return HashIterator(self)
+	
+	cdef setComparingNode(self, RecordNode comparingNode):
 		self.comparingNode = comparingNode
 	
-	cdef HashNode getBucket(self, i64 hashed, HashNode reference, HashNode result):
+	cdef RecordNode getBucket(self, i64 hashed, RecordNode reference, RecordNode result):
 		cdef i32 i
 		cdef i32 m
 		cdef i64 storedHash
 		cdef i64 storedNode
 		cdef i64 position
-		cdef HashNode stored
+		cdef RecordNode stored
 		for i in range(HASH_LAYER) :
 			m = self.layerModulus[i]
 			if i > self.layer: break
@@ -173,15 +178,14 @@ cdef class HashStorage:
 					return stored
 		return None
 
-	cdef int setBucket(self, i64 hashed, HashNode node):
-		cdef HashNode stored
+	cdef int setBucket(self, i64 hashed, RecordNode node):
+		cdef RecordNode stored
 		cdef i64 storedHash = -1
 		cdef i64 storedNode = -1
 		cdef i64 position
 		cdef i32 i
 		cdef i32 j
 		cdef i32 m
-		
 		for i in range(HASH_LAYER) :
 			m = self.layerModulus[i]
 			if i >= self.layer:
@@ -196,7 +200,6 @@ cdef class HashStorage:
 				self.io.read(&self.stream, HASH_SIZE)
 				storedHash = (<i64 *> getBuffer(&self.stream, 8))[0]
 				storedNode = (<i64 *> getBuffer(&self.stream, 8))[0]
-
 			if storedHash == -1:
 				self.appendNode(node)
 				self.io.seek(position)
@@ -213,7 +216,7 @@ cdef class HashStorage:
 					return FOUND_AND_SET
 		return NOT_SET
 	
-	cdef i64 setTreeRoot(self, i64 hashed, HashNode node):
+	cdef i64 setTreeRoot(self, i64 hashed, RecordNode node):
 		self.appendNode(node)
 		cdef i64 padding = -1
 		self.stream.position = 0
@@ -225,7 +228,7 @@ cdef class HashStorage:
 		self.io.tail = self.io.append(&self.stream)
 		return position
 	
-	cdef int setTree(self, i64 hashed, HashNode node, i64 rootPosition):
+	cdef int setTree(self, i64 hashed, RecordNode node, i64 rootPosition):
 		cdef i64 position = rootPosition
 		cdef i64 padding = -1
 		cdef i64 left
@@ -233,7 +236,7 @@ cdef class HashStorage:
 		cdef i64 storedHash
 		cdef i64 storedNode
 		cdef i64 tail
-		cdef HashNode stored
+		cdef RecordNode stored
 		cdef int layer = 0
 		while True:
 			self.io.seek(position)
@@ -293,7 +296,7 @@ cdef class HashStorage:
 				else :
 					position = left
 	
-	cdef int setTreePage(self, i64 hashed, HashNode node):
+	cdef int setTreePage(self, i64 hashed, RecordNode node):
 		if self.treePosition < 0 : self.createTreePage()
 		cdef i64 modulus = hashed%self.layerModulus[HASH_LAYER-1]
 		cdef i64 position = self.treePosition+(modulus)*8
@@ -323,13 +326,13 @@ cdef class HashStorage:
 				self.io.fill(&self.pageStream)
 				n = n - PAGE_SIZE
 	
-	cdef HashNode getTree(self, i64 hashed, HashNode reference, HashNode result, i64 rootPosition):
+	cdef RecordNode getTree(self, i64 hashed, RecordNode reference, RecordNode result, i64 rootPosition):
 		cdef i64 position = rootPosition
 		cdef i64 left
 		cdef i64 right
 		cdef i64 storedHash
 		cdef i64 storedNode
-		cdef HashNode stored
+		cdef RecordNode stored
 		cdef int layer = 0
 		while True :
 			self.io.seek(position)
@@ -354,7 +357,7 @@ cdef class HashStorage:
 			if position < 0 : break
 		return None
 	
-	cdef HashNode getTreePage(self, i64 hashed, HashNode reference, HashNode result):
+	cdef RecordNode getTreePage(self, i64 hashed, RecordNode reference, RecordNode result):
 		cdef i64 modulus = hashed%self.layerModulus[HASH_LAYER-1]
 		cdef i64 position = self.treePosition+(modulus)*8
 		self.io.seek(position)
@@ -369,7 +372,7 @@ cdef class HashStorage:
 	cdef expandLayer(self, i32 layer):
 		cdef i64 n = self.layerModulus[layer-1]*HASH_SIZE
 		self.layerPosition[layer-1] = self.io.getTail()
-		print(f'>>> Expand layer {layer} {self.layerPosition[layer-1]}')
+		print(f'>>> Expand layer {layer} {self.layerPosition[layer-1]} {self.name}')
 		while True:
 			if n < PAGE_SIZE:
 				self.pageStream.position = n
@@ -381,15 +384,3 @@ cdef class HashStorage:
 				n = n - PAGE_SIZE
 		self.layer = layer
 		self.writeHeader()
-
-	cdef appendNode(self, HashNode node):
-		raise NotImplementedError
-	
-	cdef HashNode readNodeKey(self, i64 position, HashNode node):
-		raise NotImplementedError
-	
-	cdef readNodeValue(self, HashNode node):
-		raise NotImplementedError
-	
-	cdef writeNode(self, HashNode node):
-		raise NotImplementedError
